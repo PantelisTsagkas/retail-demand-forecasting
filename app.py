@@ -10,7 +10,11 @@ import pandas as pd
 import streamlit as st
 
 REPORTS = Path(__file__).parent / "reports"
-COLOURS = {"Actual": "#f0efec", "LightGBM": "#3987e5", "baseline": "#d95926"}
+# Same colours as the README figures: actual is ink, LightGBM blue, best baseline orange.
+COLOURS = {"Actual": "#0b0b0b", "LightGBM": "#2a78d6", "baseline": "#eb6834"}
+MODEL_ORDER = ["Last day", "Same weekday last week", "Mean of last 4 same weekdays", "LightGBM"]
+SEGMENT_ORDER = ["perishable", "non-perishable", "high volume", "medium volume", "low volume"]
+REPO = "https://github.com/PantelisTsagkas/retail-demand-forecasting"
 
 
 @st.cache_data
@@ -52,14 +56,15 @@ st.title("Retail demand forecasting")
 st.caption(
     "Daily units per store and product family, forecast every Tuesday for the next 7 days. "
     "Real data from Corporación Favorita (Ecuador, public Kaggle dataset). "
-    "Test period: 8 weeks, 21 Jun to 15 Aug 2017, never seen during training or model choice."
+    "Test period: 8 weeks, 21 Jun to 15 Aug 2017, never seen during training or model choice. "
+    f"[Code and write-up on GitHub]({REPO})."
 )
 
 col1, col2, col3 = st.columns(3)
 model_wape = test.loc["LightGBM", "WAPE"]
 baseline_wape = test.loc[baseline, "WAPE"]
 col1.metric("LightGBM test WAPE", f"{model_wape:.1%}")
-col2.metric(f"Best baseline: {baseline}", f"{baseline_wape:.1%}")
+col2.metric("Best baseline test WAPE", f"{baseline_wape:.1%}", help=baseline)
 col3.metric(
     "Relative error reduction",
     f"{(baseline_wape - model_wape) / baseline_wape:.0%}",
@@ -94,7 +99,7 @@ else:
                     domain=domain,
                     range=[COLOURS["Actual"], COLOURS["LightGBM"], COLOURS["baseline"]],
                 ),
-                legend=alt.Legend(title=None, orient="top"),
+                legend=alt.Legend(title=None, orient="top", labelLimit=400),
             ),
             strokeDash=alt.condition(
                 alt.datum.series == baseline, alt.value([6, 4]), alt.value([1, 0])
@@ -120,7 +125,11 @@ else:
 
 st.subheader("Error by model (test period)")
 st.dataframe(
-    percent(test.reset_index(), ["WAPE", "Bias"]).round(3),
+    test.reset_index()
+    .drop(columns="period")
+    .style.format(
+        {"MAE": "{:.1f}", "RMSE": "{:.1f}", "WAPE": "{:.1%}", "RMSLE": "{:.3f}", "Bias": "{:+.1%}"}
+    ),
     hide_index=True,
     width="stretch",
 )
@@ -128,7 +137,7 @@ st.dataframe(
 st.subheader("Error by segment (test WAPE)")
 segment_wape = data["segments"].pivot(index="segment", columns="model", values="WAPE")
 st.dataframe(
-    (segment_wape * 100).round(1).astype(str) + "%",
+    segment_wape.loc[SEGMENT_ORDER, MODEL_ORDER].style.format("{:.1%}"),
     width="stretch",
 )
 
@@ -141,6 +150,7 @@ st.caption(
 matched = data["matched"].copy()
 matched["fill_rate"] = (matched["fill_rate"] * 100).map("{:.0f}%".format)
 waste = matched.pivot(index="model", columns="fill_rate", values="wasted_units_perishable")
+waste = waste.loc[MODEL_ORDER]
 st.markdown("**Perishable units wasted over 8 weeks, at the same fill rate**")
 st.dataframe(
     waste.map(lambda v: "not reached" if pd.isna(v) else f"{v:,.0f}"),
@@ -156,13 +166,17 @@ curve = (
             axis=alt.Axis(format="%"),
             scale=alt.Scale(domain=[0.95, 1.0]),
         ),
-        y=alt.Y("wasted_units_perishable:Q", title="Perishable units wasted"),
+        y=alt.Y(
+            "wasted_units_perishable:Q",
+            title="Perishable units wasted",
+            axis=alt.Axis(format="~s"),
+        ),
         color=alt.Color(
             "model:N",
             scale=alt.Scale(
                 domain=["LightGBM", baseline], range=[COLOURS["LightGBM"], COLOURS["baseline"]]
             ),
-            legend=alt.Legend(title=None, orient="top"),
+            legend=alt.Legend(title=None, orient="top", labelLimit=400),
         ),
         tooltip=[
             "model:N",
@@ -183,7 +197,7 @@ bars = (
     alt.Chart(importance, mark=alt.MarkDef(type="bar", color=COLOURS["LightGBM"]))
     .encode(
         x=alt.X("share:Q", title="Share of total gain", axis=alt.Axis(format="%")),
-        y=alt.Y("feature:N", sort="-x", title=None),
+        y=alt.Y("feature:N", sort="-x", title=None, axis=alt.Axis(labelLimit=300)),
         tooltip=["feature:N", alt.Tooltip("share:Q", format=".1%")],
     )
     .properties(height=320)
