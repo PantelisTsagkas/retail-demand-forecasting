@@ -99,9 +99,12 @@ def load() -> dict[str, pd.DataFrame]:
     }
 
 
-@st.cache_data
 def image_data_uri(path: Path) -> str:
-    """A JPEG as a data URI, so CSS can use it as a background."""
+    """A JPEG as a data URI, so CSS can use it as a background.
+
+    Not cached: a cache keyed on the path would keep serving an old image after the file
+    is replaced, and reading one small file per run costs nothing.
+    """
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:image/jpeg;base64,{encoded}"
 
