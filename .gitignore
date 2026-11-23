@@ -1,0 +1,21 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Data (Kaggle rules: do not redistribute)
+data/
+*.duckdb
+*.duckdb.wal
+.ruff_cache/
+.pytest_cache/
+reports/predictions_validation.parquet
+
+# Personal study notes (local only)
+STUDY_GUIDE.md
