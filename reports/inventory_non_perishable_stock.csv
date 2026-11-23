@@ -1,0 +1,13 @@
+model,fill_rate,avg_leftover_stock_non_perishable
+Last day,0.97,1081367.8469271937
+Last day,0.98,1387032.686985173
+Last day,0.99,2130278.337346731
+Same weekday last week,0.97,478023.8039392224
+Same weekday last week,0.98,644624.0875083107
+Same weekday last week,0.99,989821.0317589372
+Mean of last 4 same weekdays,0.97,370684.12515083136
+Mean of last 4 same weekdays,0.98,524058.54864477797
+Mean of last 4 same weekdays,0.99,886110.3643364594
+LightGBM,0.97,286713.610995217
+LightGBM,0.98,436310.78748686175
+LightGBM,0.99,816143.5708991176

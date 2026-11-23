@@ -9,6 +9,12 @@ Assumptions (kept deliberately simple, and stated in the README):
 - Models are compared at the same fill rate: we sweep z, then read each model's waste
   at a matched fill rate. Comparing at one fixed z would favour whichever model happens
   to hold more stock.
+- Fill rate is measured separately for perishable and non-perishable families, and each
+  outcome is matched on its own segment's fill rate: perishable waste at the perishable
+  fill rate, non-perishable leftover stock at the non-perishable fill rate. A single
+  fill rate across both would let a model trade empty fresh shelves for full dry ones.
+- The sweep runs on the test weeks, so it is a look-back comparison of operating points,
+  not a policy chosen in advance. It treats every model the same way.
 - Demand that cannot be served is lost (no backorders).
 - Perishable families: anything left at the end of the week is thrown away.
   Non-perishable families: leftovers carry over to the next week.
@@ -21,7 +27,11 @@ import numpy as np
 import pandas as pd
 
 Z_GRID: tuple[float, ...] = tuple(float(z) for z in np.arange(0.0, 4.01, 0.25))
-FILL_RATE_TARGETS: tuple[float, ...] = (0.97, 0.98, 0.99)
+# Targets sit inside the range every competitive model reaches in the sweep. Perishables
+# are rarely short (the best baseline serves 98.3% even with no safety stock), so their
+# targets are higher.
+PERISHABLE_TARGETS: tuple[float, ...] = (0.985, 0.99, 0.995)
+NON_PERISHABLE_TARGETS: tuple[float, ...] = (0.97, 0.98, 0.99)
 KEYS = ["store_nbr", "family"]
 
 logger = logging.getLogger(__name__)
@@ -100,32 +110,43 @@ def simulate_model(
         z: Safety stock multiplier.
 
     Returns:
-        Fill rate, lost units, wasted perishable units and average leftover stock.
+        Fill rate per segment (perishable, non-perishable), lost units, wasted perishable
+        units and average weekly leftover non-perishable stock.
     """
     buffers = safety_stocks(validation_weekly, model, z)
     n_weeks = test_weekly["origin"].nunique()
-    demand = served = lost = wasted = ending = 0.0
+    demand = {True: 0.0, False: 0.0}
+    served = {True: 0.0, False: 0.0}
+    lost = wasted = ending = 0.0
     for _, weeks in test_weekly.groupby(KEYS, observed=True):
         first = weeks.iloc[0]
+        perishable = bool(first["perishable"])
         outcome = simulate_series(
             weeks["target"].to_numpy(),
             weeks[model].to_numpy(),
             float(buffers.get((first["store_nbr"], first["family"]), 0.0)),
-            bool(first["perishable"]),
+            perishable,
         )
-        demand += outcome.demand
-        served += outcome.served
+        demand[perishable] += outcome.demand
+        served[perishable] += outcome.served
         lost += outcome.lost
         wasted += outcome.wasted
-        ending += outcome.ending_stock
+        if not perishable:
+            ending += outcome.ending_stock
     return {
         "model": model,
         "z": z,
-        "fill_rate": served / demand,
+        "fill_rate_perishable": _ratio(served[True], demand[True]),
+        "fill_rate_non_perishable": _ratio(served[False], demand[False]),
         "lost_units": lost,
         "wasted_units_perishable": wasted,
         "avg_leftover_stock_non_perishable": ending / n_weeks,
     }
+
+
+def _ratio(numerator: float, denominator: float) -> float:
+    """numerator / denominator, or NaN when there is no demand to serve."""
+    return numerator / denominator if denominator > 0 else float("nan")
 
 
 def service_frontier(
@@ -155,48 +176,30 @@ def service_frontier(
 
 
 def at_matched_fill_rate(
-    frontier: pd.DataFrame, targets: tuple[float, ...] = FILL_RATE_TARGETS
+    frontier: pd.DataFrame, fill_column: str, value_column: str, targets: tuple[float, ...]
 ) -> pd.DataFrame:
-    """Interpolate each model's waste and leftover stock at the same fill rates.
+    """Interpolate each model's outcome at the same fill rates.
 
     Args:
         frontier: Output of service_frontier.
-        targets: Fill rates to compare at. Each must lie inside every model's swept range.
+        fill_column: Fill rate to match on, e.g. "fill_rate_perishable".
+        value_column: Outcome to read off, e.g. "wasted_units_perishable".
+        targets: Fill rates to compare at.
 
     Returns:
-        One row per (model, target fill rate).
-
-        Targets a model never reaches in the sweep get NaN values.
+        One row per (model, target fill rate) with columns model, fill_rate and
+        value_column. Targets a model never reaches in the sweep get NaN.
     """
     records: list[dict[str, float | str]] = []
     for model, rows in frontier.groupby("model", sort=False):
-        rows = rows.sort_values("fill_rate")
-        fill = rows["fill_rate"].to_numpy()
+        rows = rows.sort_values(fill_column)
+        fill = rows[fill_column].to_numpy()
         for target in targets:
-            if not fill.min() <= target <= fill.max():
+            value = float("nan")
+            if fill.min() <= target <= fill.max():
+                value = float(np.interp(target, fill, rows[value_column].to_numpy()))
+            else:
                 # Unreachable in the swept range: record it as missing, never extrapolate.
-                logger.warning("%s never reaches a %.0f%% fill rate", model, target * 100)
-                records.append(
-                    {
-                        "model": str(model),
-                        "fill_rate": target,
-                        "wasted_units_perishable": float("nan"),
-                        "avg_leftover_stock_non_perishable": float("nan"),
-                    }
-                )
-                continue
-            records.append(
-                {
-                    "model": str(model),
-                    "fill_rate": target,
-                    "wasted_units_perishable": float(
-                        np.interp(target, fill, rows["wasted_units_perishable"].to_numpy())
-                    ),
-                    "avg_leftover_stock_non_perishable": float(
-                        np.interp(
-                            target, fill, rows["avg_leftover_stock_non_perishable"].to_numpy()
-                        )
-                    ),
-                }
-            )
+                logger.warning("%s never reaches %.1f%% (%s)", model, target * 100, fill_column)
+            records.append({"model": str(model), "fill_rate": target, value_column: value})
     return pd.DataFrame(records)

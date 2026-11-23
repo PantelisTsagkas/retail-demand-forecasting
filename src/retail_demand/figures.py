@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.axes import Axes
 
+from retail_demand.evaluate import best_baseline
+
 logger = logging.getLogger(__name__)
 
 SURFACE = "#fcfcfb"
@@ -53,12 +55,6 @@ def _save(fig: plt.Figure, out: Path) -> None:
     fig.savefig(out)
     plt.close(fig)
     logger.info("Wrote %s", out)
-
-
-def best_baseline(overall: pd.DataFrame) -> str:
-    """The baseline with the lowest validation WAPE (chosen on validation, not test)."""
-    validation = overall[(overall["period"] == "validation") & (overall["model"] != "LightGBM")]
-    return str(validation.sort_values("WAPE").iloc[0]["model"])
 
 
 def weekly_sales(con: duckdb.DuckDBPyConnection, out: Path) -> None:
@@ -179,15 +175,15 @@ def feature_importance(importance: pd.DataFrame, out: Path) -> None:
 
 
 def inventory_frontier(frontier: pd.DataFrame, baseline: str, out: Path) -> None:
-    """Fill rate vs perishable waste as safety stock grows, best baseline vs LightGBM."""
+    """Perishable fill rate vs perishable waste as safety stock grows, best baseline vs LightGBM."""
     fig, ax = plt.subplots(figsize=(8, 4.2))
     for model, colour in (
         ("LightGBM", MODEL_COLOURS["LightGBM"]),
         (baseline, MODEL_COLOURS["baseline"]),
     ):
-        rows = frontier[frontier["model"] == model].sort_values("fill_rate")
+        rows = frontier[frontier["model"] == model].sort_values("fill_rate_perishable")
         ax.plot(
-            rows["fill_rate"] * 100,
+            rows["fill_rate_perishable"] * 100,
             rows["wasted_units_perishable"] / 1e6,
             color=colour,
             linewidth=2,
@@ -195,9 +191,9 @@ def inventory_frontier(frontier: pd.DataFrame, baseline: str, out: Path) -> None
             markersize=5,
             label=model,
         )
-    ax.set_xlim(95, 100)
-    ax.set_title("More safety stock: fewer lost sales, more waste")
-    ax.set_xlabel("Fill rate: share of demand served (%)")
+    ax.set_xlim(97.5, 100)
+    ax.set_title("Perishables: more safety stock, fewer lost sales, more waste")
+    ax.set_xlabel("Perishable fill rate: share of perishable demand served (%)")
     ax.set_ylabel("Perishable units wasted (M)")
     ax.legend(loc="upper left")
     _grid(ax, "both")

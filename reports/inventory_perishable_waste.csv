@@ -1,0 +1,13 @@
+model,fill_rate,wasted_units_perishable
+Last day,0.985,5657495.506799016
+Last day,0.99,
+Last day,0.995,
+Same weekday last week,0.985,953448.2520699048
+Same weekday last week,0.99,1268549.3751375612
+Same weekday last week,0.995,1796935.248836313
+Mean of last 4 same weekdays,0.985,733917.5648411107
+Mean of last 4 same weekdays,0.99,982482.038956425
+Mean of last 4 same weekdays,0.995,1450939.2633830663
+LightGBM,0.985,668629.7251960469
+LightGBM,0.99,902693.4590109715
+LightGBM,0.995,1454618.9239168696
