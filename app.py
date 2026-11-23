@@ -502,7 +502,7 @@ html(
     "no lead times or costs and is a look-back comparison. One summer test window.<br>"
     f'<a href="{REPO}" target="_blank">Code, method and full write-up on GitHub</a><br>'
     "<b>Photos:</b> "
-    '<a href="https://unsplash.com/photos/wRfL8v76gp8" target="_blank">Markus Winkler</a> and '
+    '<a href="https://unsplash.com/photos/D6Tu_L3chLE" target="_blank">nrd</a> and '
     '<a href="https://unsplash.com/photos/ivfp_yxZuYQ" target="_blank">Franki Chamaki</a> '
     "on Unsplash."
     "</div>"
