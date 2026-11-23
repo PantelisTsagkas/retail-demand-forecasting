@@ -4,4 +4,11 @@ primaryColor = "#2a78d6"
 backgroundColor = "#fcfcfb"
 secondaryBackgroundColor = "#f2f1ed"
 textColor = "#0b0b0b"
-font = "sans-serif"
+borderColor = "#e4e2dc"
+showWidgetBorder = true
+baseRadius = "small"
+font = "'DM Sans':https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap, sans-serif"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap, monospace"
+
+[client]
+toolbarMode = "viewer"
