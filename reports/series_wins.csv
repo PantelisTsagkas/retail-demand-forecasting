@@ -1,0 +1,2 @@
+model,baseline,n_series,share_won,share_won_by_over_5pct,median_relative_improvement
+LightGBM,Mean of last 4 same weekdays,1686,0.8712930011862396,0.7378410438908659,0.10593517844397075

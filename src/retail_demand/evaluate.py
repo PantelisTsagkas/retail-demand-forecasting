@@ -11,7 +11,12 @@ import numpy as np
 import pandas as pd
 
 from retail_demand.features import FEATURES, HISTORY, Splits, build_samples, make_splits
-from retail_demand.inventory import at_matched_fill_rate, service_frontier
+from retail_demand.inventory import (
+    NON_PERISHABLE_TARGETS,
+    PERISHABLE_TARGETS,
+    at_matched_fill_rate,
+    service_frontier,
+)
 from retail_demand.metrics import score
 from retail_demand.model import BASELINES, fit_with_early_stopping, predict, refit
 from retail_demand.panel import SalesPanel, load_panel
@@ -67,6 +72,75 @@ def volume_band(panel: SalesPanel, splits: Splits) -> pd.Series:
     bands = pd.qcut(mean_sales.rank(method="first"), 3, labels=["low", "medium", "high"])
     index = pd.MultiIndex.from_frame(panel.series[["store_nbr", "family"]])
     return pd.Series(bands.astype(str).to_numpy(), index=index, name="volume_band")
+
+
+def best_baseline(overall: pd.DataFrame) -> str:
+    """The baseline with the lowest validation WAPE (chosen on validation, not test)."""
+    validation = overall[
+        (overall["period"] == "validation") & (overall["model"].isin(list(BASELINES)))
+    ]
+    return str(validation.sort_values("WAPE").iloc[0]["model"])
+
+
+def series_wape(predictions: pd.DataFrame, model: str, baseline: str) -> pd.DataFrame:
+    """WAPE per store x family series for a model and a baseline.
+
+    Series with no sales in the period are dropped, as WAPE is undefined for them.
+
+    Args:
+        predictions: Daily rows with `target` and one column per model.
+        model: Prediction column to judge.
+        baseline: Prediction column to compare against.
+
+    Returns:
+        One row per series: store_nbr, family, actual units, both WAPEs and whether the
+        model's WAPE is lower.
+    """
+    errors = pd.DataFrame(
+        {
+            "store_nbr": predictions["store_nbr"],
+            "family": predictions["family"],
+            "actual": predictions["target"],
+            "model_abs_error": (predictions[model] - predictions["target"]).abs(),
+            "baseline_abs_error": (predictions[baseline] - predictions["target"]).abs(),
+        }
+    )
+    totals = errors.groupby(["store_nbr", "family"], observed=True).sum().reset_index()
+    totals = totals[totals["actual"] > 0].copy()
+    totals["model_wape"] = totals["model_abs_error"] / totals["actual"]
+    totals["baseline_wape"] = totals["baseline_abs_error"] / totals["actual"]
+    totals["model_wins"] = totals["model_wape"] < totals["baseline_wape"]
+    keep = ["store_nbr", "family", "actual", "model_wape", "baseline_wape", "model_wins"]
+    return totals[keep].reset_index(drop=True)
+
+
+def series_win_summary(per_series: pd.DataFrame, model: str, baseline: str) -> pd.DataFrame:
+    """How often, and by how much, the model beats the baseline across series.
+
+    Args:
+        per_series: Output of series_wape.
+        model: Name of the model, for the report.
+        baseline: Name of the baseline, for the report.
+
+    Returns:
+        A single row: series count, share won, share won by more than 5% relative WAPE,
+        and the median relative WAPE improvement.
+    """
+    relative = (per_series["baseline_wape"] - per_series["model_wape"]) / per_series[
+        "baseline_wape"
+    ]
+    return pd.DataFrame(
+        [
+            {
+                "model": model,
+                "baseline": baseline,
+                "n_series": len(per_series),
+                "share_won": float(per_series["model_wins"].mean()),
+                "share_won_by_over_5pct": float((relative > 0.05).mean()),
+                "median_relative_improvement": float(relative.median()),
+            }
+        ]
+    )
 
 
 def segment_table(predictions: pd.DataFrame) -> pd.DataFrame:
@@ -150,13 +224,30 @@ def run(db_path: Path, reports: Path) -> None:
     )
     test_predictions[keep + model_names()].to_parquet(reports / "predictions_test.parquet")
 
+    baseline = best_baseline(overall)
+    per_series = series_wape(test_predictions, MODEL_NAME, baseline)
+    per_series.to_csv(reports / "series_wape.csv", index=False)
+    wins = series_win_summary(per_series, MODEL_NAME, baseline)
+    wins.to_csv(reports / "series_wins.csv", index=False)
+
     frontier = service_frontier(validation_predictions, test_predictions, model_names())
     frontier.to_csv(reports / "inventory_frontier.csv", index=False)
-    inventory = at_matched_fill_rate(frontier)
-    inventory.to_csv(reports / "inventory_matched_fill_rate.csv", index=False)
+    waste = at_matched_fill_rate(
+        frontier, "fill_rate_perishable", "wasted_units_perishable", PERISHABLE_TARGETS
+    )
+    waste.to_csv(reports / "inventory_perishable_waste.csv", index=False)
+    stock = at_matched_fill_rate(
+        frontier,
+        "fill_rate_non_perishable",
+        "avg_leftover_stock_non_perishable",
+        NON_PERISHABLE_TARGETS,
+    )
+    stock.to_csv(reports / "inventory_non_perishable_stock.csv", index=False)
 
     logger.info("\n%s", overall.round(3).to_string(index=False))
-    logger.info("\n%s", inventory.round(3).to_string(index=False))
+    logger.info("\n%s", wins.round(3).to_string(index=False))
+    logger.info("\n%s", waste.round(0).to_string(index=False))
+    logger.info("\n%s", stock.round(0).to_string(index=False))
 
 
 def main() -> None:
