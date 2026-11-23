@@ -40,7 +40,7 @@ LEFT JOIN sold USING (date, store_nbr, family)
 ORDER BY g.store_nbr, g.family, g.date
 """
 
-# A family counts as perishable when most of its items are.
+# A family counts as perishable when at least half of its items are.
 FAMILY_INFO_SQL = """
 CREATE OR REPLACE TABLE family_info AS
 SELECT family, count(*) AS n_items, avg(perishable) >= 0.5 AS perishable

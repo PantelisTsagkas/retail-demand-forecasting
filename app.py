@@ -28,7 +28,9 @@ def load() -> dict[str, pd.DataFrame]:
         "overall": pd.read_csv(REPORTS / "metrics_overall.csv"),
         "segments": pd.read_csv(REPORTS / "metrics_segments.csv"),
         "frontier": pd.read_csv(REPORTS / "inventory_frontier.csv"),
-        "matched": pd.read_csv(REPORTS / "inventory_matched_fill_rate.csv"),
+        "waste": pd.read_csv(REPORTS / "inventory_perishable_waste.csv"),
+        "stock": pd.read_csv(REPORTS / "inventory_non_perishable_stock.csv"),
+        "wins": pd.read_csv(REPORTS / "series_wins.csv"),
         "importance": pd.read_csv(REPORTS / "feature_importance.csv"),
     }
 
@@ -68,6 +70,13 @@ col2.metric("Best baseline test WAPE", f"{baseline_wape:.1%}", help=baseline)
 col3.metric(
     "Relative error reduction",
     f"{(baseline_wape - model_wape) / baseline_wape:.0%}",
+)
+wins = data["wins"].iloc[0]
+st.caption(
+    f"LightGBM beats the best baseline on {wins['share_won']:.0%} of the "
+    f"{int(wins['n_series']):,} store-family series with test sales "
+    f"(by more than 5% on {wins['share_won_by_over_5pct']:.0%}; "
+    f"median improvement {wins['median_relative_improvement']:.0%})."
 )
 
 st.subheader("Forecast vs actual")
@@ -145,26 +154,37 @@ st.subheader("Inventory simulation")
 st.caption(
     "Weekly order-up-to policy: stock = 7-day forecast + safety stock, sized from each model's "
     "own validation errors. Unsold perishables are thrown away at week end; lost sales are not "
-    "backordered. Models are compared at the same fill rate. Simplified, at family level."
+    "backordered. Each outcome is compared at the same fill rate for its own segment: "
+    "perishable waste at the perishable fill rate, leftover dry stock at the non-perishable "
+    "fill rate. The safety stock sweep runs on the test weeks, so this is a look-back "
+    "comparison, not a measured saving. Simplified, at family level."
 )
-matched = data["matched"].copy()
-matched["fill_rate"] = (matched["fill_rate"] * 100).map("{:.0f}%".format)
-waste = matched.pivot(index="model", columns="fill_rate", values="wasted_units_perishable")
-waste = waste.loc[MODEL_ORDER]
-st.markdown("**Perishable units wasted over 8 weeks, at the same fill rate**")
-st.dataframe(
-    waste.map(lambda v: "not reached" if pd.isna(v) else f"{v:,.0f}"),
-    width="stretch",
+
+
+def matched_table(table: pd.DataFrame, value: str) -> pd.DataFrame:
+    """Models as rows, target fill rates as columns, formatted for display."""
+    out = table.copy()
+    out["fill_rate"] = (out["fill_rate"] * 100).map("{:.1f}%".format)
+    wide = out.pivot(index="model", columns="fill_rate", values=value).loc[MODEL_ORDER]
+    return wide.map(lambda v: "not reached" if pd.isna(v) else f"{v:,.0f}")
+
+
+left, right = st.columns(2)
+left.markdown("**Perishable units wasted over 8 weeks, at the same perishable fill rate**")
+left.dataframe(matched_table(data["waste"], "wasted_units_perishable"), width="stretch")
+right.markdown(
+    "**Average non-perishable stock left per week, at the same non-perishable fill rate**"
 )
+right.dataframe(matched_table(data["stock"], "avg_leftover_stock_non_perishable"), width="stretch")
 frontier = data["frontier"][data["frontier"]["model"].isin(["LightGBM", baseline])]
 curve = (
     alt.Chart(frontier, mark=alt.MarkDef(type="line", point=True, strokeWidth=2))
     .encode(
         x=alt.X(
-            "fill_rate:Q",
-            title="Fill rate",
+            "fill_rate_perishable:Q",
+            title="Perishable fill rate",
             axis=alt.Axis(format="%"),
-            scale=alt.Scale(domain=[0.95, 1.0]),
+            scale=alt.Scale(domain=[0.975, 1.0]),
         ),
         y=alt.Y(
             "wasted_units_perishable:Q",
@@ -181,14 +201,19 @@ curve = (
         tooltip=[
             "model:N",
             alt.Tooltip("z:Q", title="Safety stock z"),
-            alt.Tooltip("fill_rate:Q", format=".1%"),
+            alt.Tooltip("fill_rate_perishable:Q", format=".1%", title="Perishable fill rate"),
             alt.Tooltip("wasted_units_perishable:Q", format=",.0f", title="Wasted"),
         ],
     )
-    .transform_filter(alt.datum.fill_rate >= 0.95)
+    .transform_filter(alt.datum.fill_rate_perishable >= 0.975)
     .properties(height=320)
 )
 st.altair_chart(curve, width="stretch")
+st.caption(
+    "The curves cross near a 99.5% perishable fill rate: above it the baseline wastes slightly "
+    "less. LightGBM's inventory gain is larger on non-perishables, where its forecast gain is "
+    "also larger."
+)
 
 st.subheader("What the model relies on")
 importance = data["importance"].head(12).copy()

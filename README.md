@@ -19,9 +19,9 @@ On 8 weeks of held-out test data (21 June to 15 August 2017) that played no part
 | Mean of last 4 same weekdays | 68.4 | 250.9 | 14.4% | 0.445 | +1.7% |
 | **LightGBM** | **59.5** | **237.0** | **12.6%** | **0.395** | **-0.5%** |
 
-- LightGBM cuts WAPE by 13% relative to the best baseline (14.4% to 12.6%), and beats it on 87% of the 1,686 store-family series with sales in the test period.
-- Its bias is close to zero: it neither over- nor under-forecasts in total.
-- In the inventory simulation, at the same 98% fill rate, LightGBM's forecasts lead to 17% less perishable waste and 18% less leftover stock than the best baseline. At a 99% fill rate the gap shrinks to 7% and 9%.
+- LightGBM cuts WAPE by 13% relative to the best baseline (14.4% to 12.6%), and beats it on 87% of the 1,686 store-family series with sales in the test period (by more than 5% on 74% of them; median improvement 11%). Per-series results are in `reports/series_wape.csv`.
+- Its total bias is close to zero, but that hides the segments: it under-forecasts medium-volume series by 8% and low-volume series by 19% (see Evaluation).
+- In the inventory simulation, at the same non-perishable fill rate of 98%, LightGBM's forecasts leave 17% less unsold dry stock than the best baseline. On perishables the gain is smaller: about 8% less waste at a 98.5-99% perishable fill rate, and none above 99.5%.
 
 ## The problem
 
@@ -54,8 +54,8 @@ Weekends drive demand: Sunday is the busiest day and Thursday the quietest. The 
 
 If any check fails, the pipeline stops. The SQL transform then builds the modelling tables:
 
-- **family_daily:** units per store, family and day. The raw file only holds rows where something sold, so the transform rebuilds the full calendar grid from each store's opening date and fills unsold days with zero. Returns (negative sales) are excluded, as they are not demand. 2.79M rows, 1,782 series.
-- **family_info:** marks a family as perishable when most of its items are.
+- **family_daily:** units per store, family and day. The raw file only holds rows where something sold, so the transform rebuilds the full calendar grid from each store's first recorded sale and fills unsold days with zero. Returns (negative sales) are excluded, as they are not demand. 2.79M rows, 1,782 series.
+- **family_info:** marks a family as perishable when at least half of its items are.
 - **store_calendar:** national, regional and local holiday flags per store, matched on the store's city and state. Transferred holidays are handled correctly.
 
 ### 2. Forecast setup
@@ -113,7 +113,20 @@ Overall numbers can hide weak spots, so test results are also split by segment:
 
 - The model helps most on non-perishable series (16.2% to 13.8%) and high-volume series (13.8% to 12.0%).
 - On perishables the gain is smaller (10.8% to 10.0%), because fresh food already follows a very stable weekly rhythm that the baseline captures well.
+- Medium-volume series improve from 28.3% to 25.2%.
 - Low-volume series stay hard for every model (54% WAPE). These are intermittent products like BOOKS or BABY CARE, which need a different approach (see next steps).
+
+Bias also differs by segment, even though the total is close to zero:
+
+| Segment | LightGBM bias |
+|---|---|
+| Perishable | +0.5% |
+| Non-perishable | -1.1% |
+| High volume | -0.2% |
+| Medium volume | -7.8% |
+| Low volume | -19.2% |
+
+The smaller the series, the more the model under-forecasts. This is expected from training on log(1 + units): transforming a log-scale prediction back gives something closer to the median than the mean, and for small, skewed series the median sits well below the mean. Low-volume misses are small in units (1.5 units a day on average), but a planner would see repeated stockouts on those products. A bias correction per segment or a Tweedie objective on raw units would be the fix to test.
 
 The example chart at the top is one of the series where the baseline actually does better (store 44, Produce: 6.3% against 8.6%). The model wins on 87% of series, not all of them.
 
@@ -125,23 +138,39 @@ A better forecast only matters if it changes a decision. The simulation runs a w
 - Safety stock = z x the standard deviation of that model's own weekly errors on the validation weeks.
 - Demand that cannot be served is lost. Unsold perishables are thrown away at the end of the week. Non-perishables carry over.
 
-Comparing models at one fixed z is misleading: the model with bigger errors gets bigger buffers, serves more demand and wastes more, so neither looks clearly better. Instead the simulation sweeps z from 0 to 4 and compares models at the **same fill rate**:
+Comparing models at one fixed z is misleading: the model with bigger errors gets bigger buffers, serves more demand and wastes more, so neither looks clearly better. Instead the simulation sweeps z from 0 to 4 and compares models at the **same fill rate**.
 
-![Fill rate vs waste](reports/figures/inventory_frontier.png)
+Fill rate is measured separately for perishable and non-perishable families, and each outcome is compared at its own segment's fill rate. A single fill rate across both would let a model trade empty fresh shelves for full dry ones and still look the same.
 
-| Fill rate | Perishable waste, best baseline | Perishable waste, LightGBM | Change |
+The sweep runs on the test weeks, so the tables below are a look-back comparison of what each model could have achieved, not a policy chosen in advance or a measured saving. Every model gets the same treatment, so the comparison between them is fair.
+
+![Perishable fill rate vs waste](reports/figures/inventory_frontier.png)
+
+**Perishables: units wasted over the 8 test weeks**
+
+| Perishable fill rate | Best baseline | LightGBM | Change |
 |---|---|---|---|
-| 97% | 793K units | 627K units | -21% |
-| 98% | 1.11M units | 915K units | -17% |
-| 99% | 1.79M units | 1.66M units | -7% |
+| 98.5% | 734K units | 669K units | -9% |
+| 99% | 982K units | 903K units | -8% |
+| 99.5% | 1.45M units | 1.45M units | 0% |
 
-The benefit shrinks as the target fill rate rises: near 100% service, safety stock dominates and both curves converge. Ordering weekly also adds up daily errors, which hides some of the model's day-by-day advantage. **Lesson: forecast accuracy does not translate one-for-one into business value. It depends on the replenishment policy.**
+**Non-perishables: average unsold stock per week**
+
+| Non-perishable fill rate | Best baseline | LightGBM | Change |
+|---|---|---|---|
+| 97% | 371K units | 287K units | -23% |
+| 98% | 524K units | 436K units | -17% |
+| 99% | 886K units | 816K units | -8% |
+
+Perishables are rarely short in this data: the best baseline already serves 98.3% of perishable demand with no safety stock at all, because it over-forecasts slightly. So the perishable comparison only starts at 98.5%. The two curves cross near 99.5%, and above that the baseline wastes slightly less.
+
+The inventory gain follows the forecast gain. LightGBM improves non-perishable WAPE much more than perishable WAPE (16.2% to 13.8%, against 10.8% to 10.0%), and that is where it saves the most stock. The benefit also shrinks as the target fill rate rises: near 100% service, safety stock dominates and the curves converge. Ordering weekly adds up daily errors too, which hides some of the model's day-by-day advantage. **Lesson: forecast accuracy does not translate one-for-one into business value. It depends on the segment, the replenishment policy and the service level the business chooses.**
 
 ## Limitations
 
 - **Family level, not item level.** Real replenishment happens per item. Family totals are smoother and easier to forecast than single products.
 - **Mixed units.** Some items are sold by weight, so family totals mix kilograms and units. Error percentages are fine, but absolute unit counts are approximate.
-- **Simplified inventory.** No lead times, no shelf life beyond one week, no costs. The simulation compares models fairly, but it is not a cost estimate.
+- **Simplified inventory.** No lead times, no shelf life beyond one week, no costs. Safety stock is sized from only 8 validation weeks per series, and the fill-rate sweep is read off the test weeks. The simulation compares models fairly, but it is not a cost estimate or a deployable policy.
 - **One test window.** 8 summer weeks in 2017. A rolling backtest across seasons, including Christmas, would be stronger.
 - **No promotions** (see above).
 
@@ -194,7 +223,7 @@ src/retail_demand/
   evaluate.py    runs the whole experiment
   figures.py     README charts
 app.py           Streamlit dashboard
-tests/           31 tests: SQL transforms, leakage, splits, metrics, inventory
+tests/           35 tests: SQL transforms, leakage, splits, metrics, inventory
 reports/         metrics, predictions and figures (generated)
 ```
 
