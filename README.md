@@ -223,6 +223,7 @@ src/retail_demand/
   evaluate.py    runs the whole experiment
   figures.py     README charts
 app.py           Streamlit dashboard
+assets/          dashboard photos (Unsplash License)
 tests/           35 tests: SQL transforms, leakage, splits, metrics, inventory
 reports/         metrics, predictions and figures (generated)
 ```
