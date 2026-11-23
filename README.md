@@ -2,7 +2,7 @@
 
 **Status: ACTIVE**
 
-**Live dashboard:** https://pantelistsagkas-retail-demand-forecasting-app-glbgah.streamlit.app/
+**Live dashboard:** https://grocery-demand-forecasting.streamlit.app/
 
 Forecasting daily grocery demand for 54 supermarkets and 33 product families, then testing whether a better forecast actually means less waste on the shelf. Built on 125 million rows of real supermarket sales with a DuckDB pipeline, three honest baselines, LightGBM, and an inventory simulation.
 
@@ -177,7 +177,7 @@ On an M-series MacBook: ingest about 6 seconds, forecast about 1 minute.
 
 ## Dashboard
 
-`app.py` is a Streamlit app, [live here](https://pantelistsagkas-retail-demand-forecasting-app-glbgah.streamlit.app/), for exploring the results: pick any store and family to see forecast against actual sales, the error tables by model and segment, and the inventory trade-off curve.
+`app.py` is a Streamlit app, [live here](https://grocery-demand-forecasting.streamlit.app/), for exploring the results: pick any store and family to see forecast against actual sales, the error tables by model and segment, and the inventory trade-off curve.
 
 ## Project layout
 
